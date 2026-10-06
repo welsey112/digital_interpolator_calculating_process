@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DAC 插值计算实验</title>
+<style>html{color-scheme:light dark}body{margin:0;padding:24px;background:light-dark(#f5f7fb,#171b22)}main{max-width:1240px;margin:auto;--background-primary:light-dark(#fff,#202630);--background-secondary:light-dark(#f1f4f9,#2a3240);--text-normal:light-dark(#172439,#e3eaf4);--text-muted:light-dark(#586a81,#b1bfd2);--background-modifier-border:light-dark(#d5deea,#424d5e)}@media(max-width:600px){body{padding:12px}}</style></head><body><main id="dac-browser"></main><script>
+(function(dv){
+// 可直接粘贴到 dataviewjs 代码块，也可由 dv.view() 加载。
+// 纯本地教学模型：4 倍多相 FIR；不读写笔记，不请求网络。
+(() => {
+  const host = dv.container;
+  const doc = host.ownerDocument;
+  const root = doc.createElement('div');
+  root.className = 'dac-lab';
+  host.appendChild(root);
+  const css = doc.createElement('style');
+  css.textContent = `
+  .dac-lab{--dl-bg:var(--background-primary,#fff);--dl-soft:var(--background-secondary,#f4f6fa);--dl-text:var(--text-normal,#172439);--dl-muted:var(--text-muted,#5d697b);--dl-line:var(--background-modifier-border,#d7deea);--dl-blue:#3575da;--dl-orange:#c77c20;color:var(--dl-text);font:14px/1.55 system-ui,sans-serif;container-type:inline-size}
+  .dac-lab *{box-sizing:border-box}.dac-lab h2,.dac-lab h3{margin:0 0 8px!important;line-height:1.35}.dac-lab h2{font-size:22px}.dac-lab h3{font-size:16px}.dac-lab p{margin:8px 0}.dac-lab .dl-small{font-size:12px;color:var(--dl-muted)}
+  .dac-lab .dl-controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}.dac-lab label{display:block;font-size:12px;color:var(--dl-muted)}
+  .dac-lab input,.dac-lab select{display:block;width:100%;height:34px;margin-top:4px;padding:4px 8px;border:1px solid var(--dl-line);border-radius:6px;background:var(--dl-bg);color:var(--dl-text)}
+  .dac-lab button{background:var(--dl-soft);color:var(--dl-text);border:1px solid var(--dl-line);border-radius:6px;padding:6px 10px;height:auto;cursor:pointer;box-shadow:none}.dac-lab button:disabled{opacity:.45;cursor:default}.dac-lab button.dl-active{background:var(--dl-blue);color:white;border-color:var(--dl-blue)}
+  .dac-lab .dl-buttons{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.dac-lab .dl-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,1fr);gap:14px;align-items:start}.dac-lab .dl-panel{border:1px solid var(--dl-line);border-radius:10px;padding:14px;background:var(--dl-bg);min-width:0}.dac-lab .dl-right{position:sticky;top:12px}
+  .dac-lab .dl-result{font-size:21px;font-weight:650;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;color:var(--dl-blue)}.dac-lab .dl-math{font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dl-soft);padding:10px;border-radius:6px;margin:10px 0}
+  .dac-lab .dl-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:12px 0}.dac-lab .dl-stat{background:var(--dl-soft);padding:8px;border-radius:6px;font-variant-numeric:tabular-nums}.dac-lab .dl-stat b{display:block;font-size:16px}.dac-lab .dl-stat span{font-size:11px;color:var(--dl-muted)}
+  .dac-lab .dl-scroll{overflow:auto;max-height:430px}.dac-lab table{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums;margin:0!important}.dac-lab th,.dac-lab td{padding:6px 5px!important;border-bottom:1px solid var(--dl-line);text-align:right;white-space:nowrap}.dac-lab th{position:sticky;top:0;background:var(--dl-soft)}.dac-lab .dl-done{background:color-mix(in srgb,var(--dl-blue) 8%,transparent)}.dac-lab .dl-current{background:color-mix(in srgb,var(--dl-orange) 16%,transparent)}
+  .dac-lab svg{display:block;width:100%;height:auto;margin:10px 0;overflow:visible}.dac-lab svg text{fill:var(--dl-muted);font:11px system-ui,sans-serif}.dac-lab .dl-phases{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.dac-lab .dl-phases button{padding:8px 3px;font-size:12px}.dac-lab .dl-notice{padding:9px 12px;background:var(--dl-soft);border-left:3px solid var(--dl-blue);margin:10px 0}.dac-lab .dl-warning{border-left-color:var(--dl-orange)}
+  @container(max-width:820px){.dac-lab .dl-grid{grid-template-columns:1fr}.dac-lab .dl-right{position:static}}@media(max-width:760px){.dac-lab .dl-grid{grid-template-columns:1fr}.dac-lab .dl-right{position:static}}
+  `;
+  root.appendChild(css);
+  const ui = doc.createElement('div');
+  ui.innerHTML = `
+    <h2>DAC 插值器：样本复用与逐项累加</h2>
+    <p class="dl-small">教学模型 · 4 倍多相 FIR · 窗化 sinc 系数 · 此处模拟数字插值阶段，未模拟 DAC 转换核心、ΣΔ 调制器或模拟低通。</p>
+    <div class="dl-controls">
+      <label>演示场景<select data-key="scene"><option value="audio">音频：3 kHz + 7 kHz</option><option value="low">采样讨论：100 Hz 余弦</option></select></label>
+      <label>输入采样率 fₛ / Hz<select data-key="fs"><option>48000</option><option>96000</option><option>201</option><option>2000</option></select></label>
+      <label>比较约束<select data-key="mode"><option value="count">固定每输出输入样本数 K</option><option value="time">固定输入首尾时间跨度</option></select></label>
+      <label>样本数 K（2–48）<input data-key="K" type="number" value="8" min="2" max="48" step="1"></label>
+      <label>目标首尾跨度 / ms<input data-key="span" type="number" value="0.1458333333" min="0.001" max="500" step="any"></label>
+      <label>系数窗函数<select data-key="window"><option value="hann">Hann 窗</option><option value="rect">矩形窗（直接截断）</option></select></label>
+      <label>第一分量 f₁ / Hz<input data-key="f1" type="number" value="3000" min="0" max="100000" step="any"></label>
+      <label>第二分量 f₂ / Hz<input data-key="f2" type="number" value="7000" min="0" max="100000" step="any"></label>
+    </div>
+    <div data-box="notice" class="dl-notice"></div>
+    <div class="dl-grid">
+      <section class="dl-panel">
+        <h3>左侧：数据怎样流动</h3>
+        <p class="dl-small">输入样本 → 选择相位系数 → 逐项相乘 → 累加 → 一个输出样本</p>
+        <div class="dl-buttons"><button data-act="prev">上一个输出</button><button data-act="next">下一个输出</button><button data-act="round">下一个输入轮次</button></div>
+        <p data-box="status"></p>
+        <div data-box="buffer"></div>
+        <div data-box="phases" class="dl-phases"></div>
+        <p data-box="reuse" class="dl-small"></p>
+        <h3>波形对比：已补偿线性相位群延迟</h3>
+        <div data-box="plot"></div>
+        <p class="dl-small">橙色线：已知合成原信号；蓝色点与连线：有限 FIR 输出（连线仅辅助观察）。点击蓝点可选中该输出。下方时间轴为输出所对应的原信号时间。</p>
+        <div data-box="metrics" class="dl-stats"></div>
+        <details><summary>公式、单位与边界说明</summary>
+          <div data-box="formula" class="dl-math"></div>
+          <p class="dl-small">四个相位共用一批输入样本，但每次选取不同系数。输入首尾跨度是 (K−1)/fₛ，并不等于所有意义下的“滤波器长度”。总系数为 4K，完整 FIR 的支撑首尾跨度为 (4K−1)/(4fₛ)。</p>
+          <p class="dl-small">固定时间模式将 K 四舍五入并限制在 2–48；实际跨度随采样网格取整，界面会报告差异。比较时保持信号频率相同，切换采样率观察。两种约束不是每个 DAC 都具有的可切换模式。</p>
+          <p class="dl-small">参考值来自已知、定义在整个时间轴上的合成信号，因此可以计算误差；真实未知录音不能仅靠样本给出这样的绝对误差。本模型未加入量化、噪声、时钟抖动。更高采样率不等于原信号能量更集中。</p>
+        </details>
+      </section>
+      <aside class="dl-panel dl-right">
+        <h3>右侧：当前输出的计算过程</h3>
+        <div data-box="result" class="dl-result" aria-live="polite"></div>
+        <div class="dl-buttons"><button data-act="reset">从第 1 项开始</button><button data-act="term">计算下一项</button><button data-act="all">计算全部项</button></div>
+        <div data-box="step" class="dl-math"></div>
+        <div class="dl-scroll"><table><thead><tr><th>k / 输入</th><th>x[n−k]</th><th>h[4k+p]</th><th>乘积</th><th>累计 S</th></tr></thead><tbody data-box="terms"></tbody></table></div>
+        <p class="dl-small">显示保留 8 位小数；内部使用未舍入数值求和。负权重可能使累计值减小，不能把样本个数理解为能量集中程度。</p>
+      </aside>
+    </div>`;
+  root.appendChild(ui);
+  const q = s => root.querySelector(s);
+  const ctrl = key => q(`[data-key="${key}"]`);
+  const box = key => q(`[data-box="${key}"]`);
+  const state = { m: 96, step: 8, chosenK: 8 };
+  const L = 4, NS = 'http://www.w3.org/2000/svg';
+  const fmt = (v, d=8) => (Math.abs(v) < 0.5*10**(-d) ? 0 : v).toFixed(d);
+  const sinc = u => Math.abs(u)<1e-12 ? 1 : Math.sin(Math.PI*u)/(Math.PI*u);
+  function settings() {
+    const fs = Number(ctrl('fs').value), timeMode = ctrl('mode').value==='time';
+    const target = Number(ctrl('span').value)/1000;
+    const requested = timeMode ? Math.round(target*fs)+1 : Math.round(Number(ctrl('K').value));
+    const K = Math.max(2,Math.min(48,requested));
+    state.m = Math.max(L*K,Math.min(4000,state.m));
+    state.step = Math.max(0,Math.min(K,state.step));
+    return {fs,K,target,requested,timeMode,f1:Number(ctrl('f1').value),f2:Number(ctrl('f2').value),low:ctrl('scene').value==='low',window:ctrl('window').value,m:state.m,n:Math.floor(state.m/L),p:state.m%L};
+  }
+  function coeffs(K,window) {
+    const N=L*K, D=(N-1)/2;
+    const raw=Array.from({length:N},(_,j)=>sinc((j-D)/L)*(window==='hann' ? .5*(1-Math.cos(2*Math.PI*j/(N-1))) : 1));
+    const gain=L/raw.reduce((a,b)=>a+b,0);
+    return {h:raw.map(v=>v*gain),D,gain};
+  }
+  function source(t,s) { return s.low ? Math.cos(2*Math.PI*s.f1*t) : .7*Math.cos(2*Math.PI*s.f1*t)+.15*Math.sin(2*Math.PI*s.f2*t); }
+  function output(m,s,h) {let sum=0;const n=Math.floor(m/L),p=m%L;for(let k=0;k<s.K;k++)sum+=h[L*k+p]*source((n-k)/s.fs,s);return sum;}
+  function svg(parent,w,h,title) { parent.replaceChildren();const e=doc.createElementNS(NS,'svg');e.setAttribute('viewBox',`0 0 ${w} ${h}`);e.setAttribute('role','img');e.setAttribute('aria-label',title);parent.appendChild(e);return e; }
+  function shape(parent,tag,attrs,text) { const e=doc.createElementNS(NS,tag);for(const [key,v] of Object.entries(attrs))e.setAttribute(key,String(v));if(text!==undefined)e.textContent=text;parent.appendChild(e);return e; }
+  function text(parent,x,y,value,anchor='start') {return shape(parent,'text',{x,y,'text-anchor':anchor},value);}
+  function drawBuffer(s) {
+    const width=Math.max(280,box('buffer').clientWidth||640);
+    const e=svg(box('buffer'),width,144,'参与当前输出计算的 K 个输入样本');
+    const dx=(width-52)/(s.K+1),xx=i=>26+i*dx,start=s.n-s.K;
+    text(e,12,16,`输入缓冲：x[${s.n-s.K+1}] … x[${s.n}]`);
+    shape(e,'rect',{x:xx(1)-dx*.4,y:28,width:dx*(s.K-.2),height:64,rx:6,fill:'var(--dl-blue)',opacity:.10});
+    shape(e,'line',{x1:26,x2:width-26,y1:57,y2:57,stroke:'var(--dl-line)'});
+    const stride=Math.max(1,Math.ceil((s.K+2)/Math.max(4,Math.floor(width/42))));
+    for(let i=0;i<s.K+2;i++) { const active=i>0&&i<=s.K,idx=start+i;
+      const current=active&&state.step>0&&idx===s.n-state.step+1;
+      shape(e,'circle',{cx:xx(i),cy:57,r:current?6:active?4:3,fill:current?'var(--dl-orange)':active?'var(--dl-blue)':'var(--dl-muted)'});
+      if(i===s.K||((i%stride===0)&&Math.abs(i-s.K)>=stride))text(e,xx(i),82,idx,'middle');
+    }
+    text(e,12,113,`下一轮移出 x[${s.n-s.K+1}]，移入 x[${s.n+1}]`);
+    text(e,12,135,`缓冲保留 ${s.K-1} 个样本；橙点为当前乘法使用的样本`);
+  }
+  function drawPlot(s,h,D) {
+    const width=Math.max(280,box('plot').clientWidth||640);
+    const e=svg(box('plot'),width,260,'延迟对齐的原信号与 FIR 重建值');
+    // 固定约 3 个第一分量周期；输出点过多时抽稀，仅用于画图。
+    const period=s.f1>0 ? s.fs*L/s.f1 : 64;
+    const radius=Math.max(16,Math.min(320,Math.round(period*1.5)));
+    const a=Math.max(L*s.K,s.m-radius),b=Math.min(4000,s.m+radius),px=m=>54+(m-a)/(b-a)*(width-70);
+    const y=v=>111-v*76;
+    for(const v of [-1,0,1]) {shape(e,'line',{x1:54,x2:width-16,y1:y(v),y2:y(v),stroke:'var(--dl-line)'});text(e,45,y(v)+4,String(v),'end');}
+    const ref=[];for(let i=0;i<=480;i++){const m=a+(b-a)*i/480;ref.push(`${px(m)},${y(source((m-D)/(L*s.fs),s))}`);}
+    shape(e,'polyline',{points:ref.join(' '),fill:'none',stroke:'var(--dl-orange)','stroke-width':2});
+    const stride=Math.max(1,Math.ceil((b-a)/120)),ms=[];for(let m=a;m<=b;m+=stride)ms.push(m);if(!ms.includes(s.m))ms.push(s.m);ms.sort((v,w)=>v-w);
+    shape(e,'polyline',{points:ms.map(m=>`${px(m)},${y(output(m,s,h))}`).join(' '),fill:'none',stroke:'var(--dl-blue)','stroke-width':1.3});
+    for(const m of ms)shape(e,'circle',{cx:px(m),cy:y(output(m,s,h)),r:m===s.m?5:2.8,fill:'var(--dl-blue)','data-output':m,style:'cursor:pointer'});
+    shape(e,'line',{x1:px(s.m),x2:px(s.m),y1:22,y2:194,stroke:'var(--dl-blue)','stroke-dasharray':'4 4',opacity:.45});
+    text(e,54,216,`${fmt((a-D)/(L*s.fs)*1000,3)} ms`);text(e,width-16,216,`${fmt((b-D)/(L*s.fs)*1000,3)} ms`,'end');text(e,(width+38)/2,244,'已补偿群延迟的参考时间 / ms','middle');
+    const axis=text(e,15,111,'归一化幅值','middle');axis.setAttribute('transform','rotate(-90 15 111)');
+  }
+  function render() {
+    const s=settings(),{h,D,gain}=coeffs(s.K,s.window);
+    state.chosenK=s.K;ctrl('K').disabled=s.timeMode;ctrl('span').disabled=!s.timeMode;ctrl('f2').disabled=s.low;
+    const targetTime=(s.m-D)/(L*s.fs),ref=source(targetTime,s),full=output(s.m,s,h);
+    let sum=0,partial=0,phaseSum=0;const rows=[];
+    for(let k=0;k<s.K;k++){const x=source((s.n-k)/s.fs,s),c=h[L*k+s.p],product=x*c;sum+=product;phaseSum+=c;if(k<state.step)partial=sum;rows.push({k,x,c,product,sum});}
+    const aliases=s.f1>=s.fs/2||(!s.low&&s.f2>=s.fs/2);
+    const span=(s.K-1)/s.fs;
+    let notice=aliases ? '当前信号分量已达到或超过输入奈奎斯特频率，采样不能保证唯一恢复；提高插值倍数不能消除已发生的混叠。' : '当前分量低于输入奈奎斯特频率；这里只比较有限 FIR 的近似效果，满足采样定理不代表短滤波器必然精确。';
+    if(s.timeMode)notice+=` 目标跨度 ${fmt(s.target*1000,6)} ms；网格取整后实际 ${fmt(span*1000,6)} ms。${s.requested!==s.K?'已触及 2–48 项演示上限。':''}`;
+    box('notice').textContent=notice;box('notice').className='dl-notice'+(aliases?' dl-warning':'');
+    box('status').textContent=`输入 ${s.fs} S/s → 输出 ${L*s.fs} S/s；m=${s.m}，n=${s.n}，p=${s.p}`;
+    box('phases').replaceChildren();for(let p=0;p<L;p++){const btn=doc.createElement('button');btn.textContent=`相位 ${p} · y[${L*s.n+p}] = ${fmt(output(L*s.n+p,s,h),6)}`;btn.dataset.phase=p;btn.className=p===s.p?'dl-active':'';box('phases').appendChild(btn);}
+    box('reuse').textContent=`这一批输入生成 y[${L*s.n}] 至 y[${L*s.n+3}]。相位 0→1→2→3 只换权重；3→下一轮 0 时才移入新输入。每个输出 ${s.K} 项，总系数 ${L*s.K} 个。`;
+    box('result').textContent=state.step===s.K ? `y[${s.m}] = ${fmt(full)}` : `S${state.step} = ${fmt(partial)}（尚未完成）`;
+    let stepText=`y[${s.m}] = Σ(k=0…${s.K-1}) h[4k+${s.p}] × x[${s.n}−k]\n已计算 ${state.step}/${s.K} 项。\n`;
+    if(state.step){const r=rows[state.step-1],prior=r.sum-r.product;stepText+=`第 ${state.step} 项：\nh[${L*r.k+s.p}] × x[${s.n-r.k}]\n= ${fmt(r.c)} × ${fmt(r.x)}\n= ${fmt(r.product)}\nS${state.step} = ${fmt(prior)} + (${fmt(r.product)})\n= ${fmt(r.sum)}`;}else stepText+='初始累加器 S0 = 0；点击“计算下一项”。';
+    box('step').textContent=stepText;
+    box('terms').replaceChildren();for(const r of rows){const tr=doc.createElement('tr');tr.className=r.k===state.step-1?'dl-current':r.k<state.step?'dl-done':'';for(const v of [`${r.k} / x[${s.n-r.k}]`,fmt(r.x),fmt(r.c),fmt(r.product),r.k<state.step?fmt(r.sum):'待计算']){const td=doc.createElement('td');td.textContent=v;tr.appendChild(td);}box('terms').appendChild(tr);}
+    const stats=[['每输出输入样本数',`${s.K} 项`],['输入首尾跨度',`${fmt(span*1000,6)} ms`],['输出样本间隔',`${fmt(1/(L*s.fs)*1e6,3)} μs`],['线性相位群延迟',`${fmt(D/(L*s.fs)*1e6,3)} μs`],['原信号参考值',fmt(ref)],['完整 FIR 输出',fmt(full)],['当前绝对误差',fmt(Math.abs(full-ref))],['当前相位系数和',fmt(phaseSum)]];
+    box('metrics').replaceChildren();for(const [name,value] of stats){const div=doc.createElement('div');div.className='dl-stat';const b=doc.createElement('b');b.textContent=value;const label=doc.createElement('span');label.textContent=name;div.append(b,label);box('metrics').appendChild(div);}
+    box('formula').textContent=`L=4，N=L×K=${L*s.K}，D=(N−1)/2=${D}\nsinc(u)=sin(πu)/(πu)，sinc(0)=1\n原型系数：a[j]=sinc((j−D)/4) × w[j]\n${s.window==='hann'?'w[j]=0.5 × (1−cos(2πj/(N−1)))':'w[j]=1（矩形窗）'}\nh[j]=a[j] × (4/Σa[j])；归一化系数 ${fmt(gain)}\nn=floor(m/4)，p=m mod 4\ny[m]=Σ(k=0…K−1) h[4k+p] × x[n−k]\n参考时间 t=(m−D)/(4fₛ)=${fmt(targetTime*1000,6)} ms\n${s.low?'x(t)=cos(2πf₁t)':'x(t)=0.7cos(2πf₁t)+0.15sin(2πf₂t)'}\n误差 |y[m]−x(t)|=${fmt(Math.abs(full-ref))}\n总系数和归一化为 4；有限截断时每个相位系数和不一定恰好为 1。`;
+    q('[data-act="prev"]').disabled=s.m<=L*s.K;q('[data-act="term"]').disabled=state.step>=s.K;q('[data-act="next"]').disabled=s.m>=4000;q('[data-act="round"]').disabled=s.m>=3996;
+    drawBuffer(s);drawPlot(s,h,D);
+  }
+  root.addEventListener('click',event=>{
+    const target=event.target.closest('[data-act],[data-phase],[data-output]');if(!target||!root.contains(target))return;
+    if(target.dataset.output!==undefined){state.m=Number(target.dataset.output);state.step=0;}
+    else if(target.dataset.phase!==undefined){state.m=L*Math.floor(state.m/L)+Number(target.dataset.phase);state.step=0;}
+    else{const a=target.dataset.act;if(a==='next')state.m++;if(a==='prev')state.m--;if(a==='round')state.m=L*(Math.floor(state.m/L)+1);if(['next','prev','round','reset'].includes(a))state.step=0;if(a==='term')state.step++;if(a==='all')state.step=state.chosenK;}
+    render();
+  });
+  root.addEventListener('change',event=>{
+    const e=event.target;if(!e.dataset.key)return;
+    if(e.type==='number'){if(!Number.isFinite(e.valueAsNumber)){e.value=e.dataset.lastValid;render();return;}const min=Number(e.min),max=Number(e.max);e.value=String(Math.max(min,Math.min(max,e.valueAsNumber)));e.dataset.lastValid=e.value;}
+    if(e.dataset.key==='scene'){const low=e.value==='low';ctrl('fs').value=low?'201':'48000';ctrl('f1').value=low?'100':'3000';ctrl('f2').value='7000';ctrl('span').value=low?String(7/201*1000):String(7/48000*1000);state.m=96;}
+    for(const key of ['K','span','f1','f2'])ctrl(key).dataset.lastValid=ctrl(key).value;
+    state.step=48;render();
+  });
+  for(const key of ['K','span','f1','f2'])ctrl(key).dataset.lastValid=ctrl(key).value;
+  render();
+  // 无定时器；Dataview 卸载此视图时清理观察器。
+  if(typeof ResizeObserver!=='undefined'&&dv.component&&typeof dv.component.register==='function') {
+    let priorWidth=root.clientWidth;
+    const observer=new ResizeObserver(()=>{if(root.clientWidth!==priorWidth){priorWidth=root.clientWidth;render();}});
+    observer.observe(root);dv.component.register(()=>observer.disconnect());
+  }
+})();
+
+})({container:document.getElementById('dac-browser')});
+</script></body></html>
